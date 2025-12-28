@@ -2,12 +2,34 @@
 
 import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
+import { AuthError } from 'next-auth';
 import { z } from 'zod';
 import postgres from 'postgres';
 
+import { signIn } from '@/auth';
+
 const sql = postgres(process.env.POSTGRES_URL!, { ssl: 'require' });
 
-const FormSchema = z.object({
+export async function authenticate(
+  prevState: string | undefined,
+  formData: FormData,
+) {
+  try {
+    await signIn('credentials', formData);
+  } catch (error) {
+    if (error instanceof AuthError) {
+      switch (error.type) {
+        case 'CredentialsSignin':
+          return 'Invalid credentials.';
+        default:
+          return 'Something went wrong.';
+      }
+    }
+    throw error;
+  }
+}
+
+const InvoiceFormSchema = z.object({
   id: z.string(),
   customerId: z.string({ invalid_type_error: 'Please select a customer.' }),
   amount: z.coerce
@@ -19,10 +41,10 @@ const FormSchema = z.object({
   date: z.string(),
 });
 
-const CreateInvoice = FormSchema.omit({ id: true, date: true });
-const UpdateInvoice = FormSchema.omit({ id: true, date: true });
+const CreateInvoiceValidator = InvoiceFormSchema.omit({ id: true, date: true });
+const UpdateInvoiceValidator = InvoiceFormSchema.omit({ id: true, date: true });
 
-export type State = {
+export type InvoicesState = {
   errors?: {
     customerId?: string[];
     amount?: string[];
@@ -31,8 +53,11 @@ export type State = {
   message?: string | null;
 };
 
-export async function createInvoice(prevState: State, formData: FormData) {
-  const validatedFields = CreateInvoice.safeParse({
+export async function createInvoice(
+  prevState: InvoicesState,
+  formData: FormData,
+) {
+  const validatedFields = CreateInvoiceValidator.safeParse({
     customerId: formData.get('customerId'),
     amount: formData.get('amount'),
     status: formData.get('status'),
@@ -66,14 +91,10 @@ export async function createInvoice(prevState: State, formData: FormData) {
 
 export async function updateInvoice(
   id: string,
-  prevState: State,
+  prevState: InvoicesState,
   formData: FormData,
 ) {
-  console.log(prevState);
-  console.log(id);
-  console.log(formData);
-
-  const validatedFields = CreateInvoice.safeParse({
+  const validatedFields = UpdateInvoiceValidator.safeParse({
     customerId: formData.get('customerId'),
     amount: formData.get('amount'),
     status: formData.get('status'),
